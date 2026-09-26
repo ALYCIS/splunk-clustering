@@ -1,0 +1,138 @@
+---
+# Déploiement complet du lab, dans l'ordre des dépendances.
+#   ansible-playbook playbooks/site.yml                    # tout
+#   ansible-playbook playbooks/site.yml --tags splunk      # plateforme Splunk
+#   ansible-playbook playbooks/site.yml --tags ingestion   # HAProxy, SC4S, Kafka, Logstash
+#   ansible-playbook playbooks/site.yml --tags ops         # Vault, Artifactory
+#   ansible-playbook playbooks/site.yml --tags uf          # Universal Forwarders
+
+- name: Socle OS
+  hosts: all
+  tags: [base, splunk, ingestion, ops, uf]
+  roles: [base_os]
+
+# ------------------------------------------------------------------ Splunk
+- name: Installation Splunk Enterprise sur toutes les instances
+  hosts: splunk
+  tags: [splunk]
+  roles: [splunk_common]
+
+- name: License Manager
+  hosts: license_manager
+  tags: [splunk]
+  tasks:
+    - name: Installation de la licence
+      when: splunk_license_file | length > 0
+      block:
+        - name: Copie du fichier licence
+          ansible.builtin.copy:
+            src: "{{ splunk_license_file }}"
+            dest: "/tmp/{{ splunk_license_file | basename }}"
+            owner: "{{ splunk_user }}"
+            mode: "0600"
+        - name: splunk add licenses
+          ansible.builtin.command: >-
+            {{ splunk_home }}/bin/splunk add licenses /tmp/{{ splunk_license_file | basename }}
+            -auth admin:{{ splunk_admin_password }}
+          become: true
+          become_user: "{{ splunk_user }}"
+          register: _lic
+          changed_when: "'already' not in _lic.stdout"
+          failed_when: _lic.rc != 0 and 'already' not in (_lic.stdout + _lic.stderr)
+          notify: restart splunk
+          no_log: true
+  handlers:
+    - name: restart splunk
+      ansible.builtin.systemd: { name: "{{ splunk_service }}", state: restarted }
+
+- name: Cluster Manager
+  hosts: cluster_manager
+  tags: [splunk]
+  roles: [splunk_cluster_manager]
+
+- name: Indexeurs (peers)
+  hosts: indexers
+  tags: [splunk]
+  roles: [splunk_indexer]
+
+- name: Attente que tous les peers aient rejoint le cluster
+  hosts: cluster_manager
+  tags: [splunk]
+  tasks:
+    - name: Liste des peers vue par le CM (API REST)
+      ansible.builtin.uri:
+        url: "https://localhost:{{ splunk_mgmt_port }}/services/cluster/manager/peers?output_mode=json&count=0"
+        user: admin
+        password: "{{ splunk_admin_password }}"
+        force_basic_auth: true
+        validate_certs: false
+      register: _peers
+      until: >-
+        _peers.json is defined and
+        (_peers.json.entry | selectattr('content.status', 'equalto', 'Up') | list | length)
+        == (groups['indexers'] | length)
+      retries: 30
+      delay: 10
+      no_log: true
+
+- name: SHC Deployer
+  hosts: shc_deployer
+  tags: [splunk]
+  roles: [splunk_shc_deployer]
+
+- name: Deployment Server
+  hosts: deployment_server
+  tags: [splunk]
+  roles: [splunk_deployment_server]
+
+- name: Search Heads (et Search Head Cluster)
+  hosts: search_heads
+  tags: [splunk]
+  roles: [splunk_search_head]
+
+- name: Distribution des configurations (bundles)
+  ansible.builtin.import_playbook: deploy_bundles.yml
+  tags: [splunk]
+
+- name: Monitoring Console
+  hosts: monitoring_console
+  tags: [splunk]
+  roles: [splunk_monitoring_console]
+
+# --------------------------------------------------------------- Ingestion
+- name: Load balancer HEC
+  hosts: hec_lb
+  tags: [ingestion]
+  roles: [hec_lb]
+
+- name: Kafka
+  hosts: kafka
+  tags: [ingestion]
+  roles: [kafka]
+
+- name: SC4S
+  hosts: sc4s
+  tags: [ingestion]
+  roles: [sc4s]
+
+- name: Logstash
+  hosts: logstash
+  tags: [ingestion]
+  roles: [logstash]
+
+# --------------------------------------------------------------------- Ops
+- name: HashiCorp Vault
+  hosts: vault
+  tags: [ops]
+  roles: [vault]
+
+- name: Artifactory
+  hosts: artifactory
+  tags: [ops]
+  roles: [artifactory]
+
+# -------------------------------------------------------------- Forwarders
+- name: Universal Forwarders
+  hosts: forwarders
+  tags: [uf]
+  roles: [splunk_uf]

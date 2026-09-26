@@ -1,0 +1,136 @@
+---
+# Configuration d'AWX / AAP Controller "as code" (collection awx.awx ou ansible.controller).
+#   export CONTROLLER_HOST=http://ops01:30080 CONTROLLER_USERNAME=admin CONTROLLER_PASSWORD=...
+#   ansible-playbook cicd/aap/configure_controller.yml -e git_url=https://gitea.lab.local/me/splunk-clustering.git
+- name: Objets AAP pour la plateforme Splunk
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    org: Splunk
+    git_url: "https://github.com/ALYCIS/splunk-clustering.git"
+    git_branch: main
+    vault_url: "http://ops01:8200"
+  tasks:
+    - name: Organisation
+      awx.awx.organization:
+        name: "{{ org }}"
+
+    # --- Credentials --------------------------------------------------------
+    - name: Credential HashiCorp Vault (AppRole) — utilisé comme "lookup" par les autres credentials
+      awx.awx.credential:
+        name: Vault - AppRole ansible
+        organization: "{{ org }}"
+        credential_type: HashiCorp Vault Secret Lookup
+        inputs:
+          url: "{{ vault_url }}"
+          role_id: "{{ lookup('env', 'ANSIBLE_HASHI_VAULT_ROLE_ID') }}"
+          secret_id: "{{ lookup('env', 'ANSIBLE_HASHI_VAULT_SECRET_ID') }}"
+          api_version: v2
+
+    - name: Credential SSH des serveurs
+      awx.awx.credential:
+        name: SSH - ansible
+        organization: "{{ org }}"
+        credential_type: Machine
+        inputs:
+          username: ansible
+          ssh_key_data: "{{ lookup('file', '~/.ssh/id_ed25519') }}"
+
+    - name: Type de credential "Vault AppRole pour les playbooks" (injecte les variables d'env)
+      awx.awx.credential_type:
+        name: Vault AppRole env
+        kind: cloud
+        inputs:
+          fields:
+            - { id: role_id, type: string, label: Role ID }
+            - { id: secret_id, type: string, label: Secret ID, secret: true }
+        injectors:
+          env:
+            ANSIBLE_HASHI_VAULT_ROLE_ID: "{% raw %}{{ role_id }}{% endraw %}"
+            ANSIBLE_HASHI_VAULT_SECRET_ID: "{% raw %}{{ secret_id }}{% endraw %}"
+
+    - name: Credential AppRole pour les playbooks
+      awx.awx.credential:
+        name: Vault AppRole - playbooks
+        organization: "{{ org }}"
+        credential_type: Vault AppRole env
+        inputs:
+          role_id: "{{ lookup('env', 'ANSIBLE_HASHI_VAULT_ROLE_ID') }}"
+          secret_id: "{{ lookup('env', 'ANSIBLE_HASHI_VAULT_SECRET_ID') }}"
+
+    # --- Projet & inventaire ------------------------------------------------
+    - name: Projet Git
+      awx.awx.project:
+        name: splunk-clustering
+        organization: "{{ org }}"
+        scm_type: git
+        scm_url: "{{ git_url }}"
+        scm_branch: "{{ git_branch }}"
+        scm_update_on_launch: true
+
+    - name: Inventaire lab
+      awx.awx.inventory:
+        name: Splunk lab
+        organization: "{{ org }}"
+
+    - name: Source d'inventaire = fichier du dépôt
+      awx.awx.inventory_source:
+        name: hosts.yml
+        inventory: Splunk lab
+        source: scm
+        source_project: splunk-clustering
+        source_path: ansible/inventories/lab/hosts.yml
+        overwrite: true
+        update_on_launch: true
+
+    # --- Job templates ------------------------------------------------------
+    - name: Job templates
+      awx.awx.job_template:
+        name: "{{ item.name }}"
+        organization: "{{ org }}"
+        project: splunk-clustering
+        inventory: Splunk lab
+        playbook: "{{ item.playbook }}"
+        job_tags: "{{ item.tags | default(omit) }}"
+        credentials: [SSH - ansible, Vault AppRole - playbooks]
+        extra_vars:
+          secrets_backend: hashicorp_vault
+        ask_variables_on_launch: true
+      loop:
+        - { name: "Splunk - deploy cluster bundle", playbook: ansible/playbooks/deploy_bundles.yml, tags: idxc }
+        - { name: "Splunk - deploy SHC bundle", playbook: ansible/playbooks/deploy_bundles.yml, tags: shc }
+        - { name: "Splunk - deploy DS apps", playbook: ansible/playbooks/deploy_bundles.yml, tags: ds }
+        - { name: "Splunk - rolling restart", playbook: ansible/playbooks/rolling_restart.yml }
+        - { name: "Splunk - rolling upgrade indexers", playbook: ansible/playbooks/rolling_upgrade_indexers.yml }
+        - { name: "Splunk - healthcheck", playbook: ansible/playbooks/healthcheck.yml }
+        - { name: "Ingestion - deploy", playbook: ansible/playbooks/site.yml, tags: ingestion }
+
+    - name: Healthcheck planifié chaque matin
+      awx.awx.schedule:
+        name: Healthcheck quotidien
+        unified_job_template: "Splunk - healthcheck"
+        rrule: "DTSTART;TZID=Europe/Paris:20250101T070000 RRULE:FREQ=DAILY;INTERVAL=1"
+
+    # --- Workflow : indexeurs -> search heads -> forwarders -> contrôle ------
+    - name: Workflow de déploiement des apps
+      awx.awx.workflow_job_template:
+        name: "Splunk - deploy apps"
+        organization: "{{ org }}"
+        inventory: Splunk lab
+        ask_variables_on_launch: true
+        workflow_nodes:
+          - identifier: idxc
+            unified_job_template: { name: "Splunk - deploy cluster bundle", type: job_template }
+            related:
+              success_nodes: [{ identifier: shc }]
+          - identifier: shc
+            unified_job_template: { name: "Splunk - deploy SHC bundle", type: job_template }
+            related:
+              success_nodes: [{ identifier: ds }]
+          - identifier: ds
+            unified_job_template: { name: "Splunk - deploy DS apps", type: job_template }
+            related:
+              success_nodes: [{ identifier: check }]
+          - identifier: check
+            unified_job_template: { name: "Splunk - healthcheck", type: job_template }

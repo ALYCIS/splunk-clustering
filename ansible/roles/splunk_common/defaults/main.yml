@@ -1,0 +1,5 @@
+---
+# Surchargées par le rôle splunk_uf pour installer l'Universal Forwarder
+_splunk_home: "{{ splunk_home }}"
+_splunk_package: "{{ splunk_package }}"
+_splunk_service: "{{ splunk_service }}"

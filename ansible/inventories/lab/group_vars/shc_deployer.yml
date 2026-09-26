@@ -1,0 +1,4 @@
+---
+firewall_ports:
+  - 8089/tcp   # SHC (fetch du bundle) + clients du Deployment Server
+  - 8000/tcp

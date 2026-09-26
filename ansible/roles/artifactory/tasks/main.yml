@@ -1,0 +1,23 @@
+---
+# Artifactory OSS (dépôts Generic) en conteneur. UI : http://ops01:8082 (admin/password au 1er login).
+- name: Podman
+  ansible.builtin.package:
+    name: podman
+    state: present
+
+- name: Volume de données
+  containers.podman.podman_volume:
+    name: artifactory-data
+    state: present
+
+- name: Conteneur Artifactory OSS
+  containers.podman.podman_container:
+    name: artifactory
+    image: releases-docker.jfrog.io/jfrog/artifactory-oss:latest
+    state: started
+    restart_policy: always
+    ports:
+      - "8081:8081"
+      - "8082:8082"
+    volumes:
+      - artifactory-data:/var/opt/jfrog/artifactory

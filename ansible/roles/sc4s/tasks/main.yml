@@ -1,0 +1,52 @@
+---
+- name: Podman
+  ansible.builtin.package:
+    name: podman
+    state: present
+
+- name: Arborescence SC4S
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - /opt/sc4s
+    - /opt/sc4s/local
+    - /opt/sc4s/local/context
+    - /opt/sc4s/archive
+    - /opt/sc4s/tls
+
+- name: Volume persistant (disk buffer syslog-ng)
+  containers.podman.podman_volume:
+    name: splunk-sc4s-var
+    state: present
+
+# Le token HEC vient de Vault/secrets : ce fichier n'est jamais dans Git
+- name: Fichier d'environnement SC4S
+  ansible.builtin.template:
+    src: env_file.j2
+    dest: /opt/sc4s/env_file
+    mode: "0600"
+  no_log: true
+  notify: restart sc4s
+
+- name: Surcharges index/sourcetype
+  ansible.builtin.copy:
+    src: "{{ repo_root }}/ingestion/sc4s/local/context/splunk_metadata.csv"
+    dest: /opt/sc4s/local/context/splunk_metadata.csv
+    mode: "0644"
+  notify: restart sc4s
+
+- name: Unité systemd SC4S (modèle de la documentation Splunk)
+  ansible.builtin.template:
+    src: sc4s.service.j2
+    dest: /etc/systemd/system/sc4s.service
+    mode: "0644"
+  notify: restart sc4s
+
+- name: SC4S démarré
+  ansible.builtin.systemd:
+    name: sc4s
+    state: started
+    enabled: true
+    daemon_reload: true

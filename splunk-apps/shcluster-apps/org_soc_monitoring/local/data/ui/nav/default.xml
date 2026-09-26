@@ -1,0 +1,7 @@
+<nav search_view="search" color="#1d4e89">
+  <view name="ingestion_overview" default="true" />
+  <view name="search" />
+  <collection label="Alertes">
+    <saved source="unclassified" />
+  </collection>
+</nav>

@@ -1,0 +1,77 @@
+---
+# Check MCO "du matin" : état du cluster, du SHC, de la chaîne d'ingestion.
+#   ansible-playbook playbooks/healthcheck.yml
+
+- name: Indexer cluster
+  hosts: cluster_manager
+  tasks:
+    - name: splunk show cluster-status
+      ansible.builtin.command: "{{ splunk_home }}/bin/splunk show cluster-status -auth admin:{{ splunk_admin_password }}"
+      become: true
+      become_user: "{{ splunk_user }}"
+      register: _r
+      changed_when: false
+      no_log: true
+    - name: Résultat
+      ansible.builtin.debug: { var: _r.stdout_lines }
+    - name: Alerte si RF/SF non respectés
+      ansible.builtin.assert:
+        that:
+          - "'Replication factor met' in _r.stdout"
+          - "'Search factor met' in _r.stdout"
+        fail_msg: "Cluster non complet : voir 'splunk show cluster-status --verbose'"
+
+- name: Search head cluster
+  hosts: "{{ groups['search_heads'][0] }}"
+  tasks:
+    - name: splunk show shcluster-status / kvstore-status
+      ansible.builtin.command: "{{ splunk_home }}/bin/splunk show {{ item }} -auth admin:{{ splunk_admin_password }}"
+      become: true
+      become_user: "{{ splunk_user }}"
+      loop: [shcluster-status, kvstore-status]
+      register: _r
+      changed_when: false
+      when: shc_enabled
+      no_log: true
+    - name: Résultat
+      ansible.builtin.debug:
+        msg: "{{ _r.results | map(attribute='stdout_lines') | list }}"
+      when: shc_enabled
+
+- name: Chaîne d'ingestion
+  hosts: ingestion
+  tasks:
+    - name: Santé HEC via le LB
+      ansible.builtin.uri:
+        url: "{{ hec_lb_url }}/services/collector/health"
+        validate_certs: false
+      register: _hec
+      failed_when: false
+    - name: Lag du consumer group Logstash
+      ansible.builtin.command: >-
+        podman exec kafka /opt/kafka/bin/kafka-consumer-groups.sh
+        --bootstrap-server localhost:9092 --describe --group logstash-splunk
+      register: _lag
+      changed_when: false
+      failed_when: false
+      when: inventory_hostname in groups['kafka']
+    - name: Statistiques des pipelines Logstash
+      ansible.builtin.uri:
+        url: http://localhost:9600/_node/stats/pipelines
+      register: _ls
+      failed_when: false
+      when: inventory_hostname in groups['logstash']
+    - name: Services  # noqa: command-instead-of-module
+      ansible.builtin.command: "systemctl is-active sc4s logstash haproxy"
+      register: _svc
+      changed_when: false
+      failed_when: false
+    - name: Synthèse
+      ansible.builtin.debug:
+        msg:
+          hec_health: "{{ _hec.status | default('n/a') }} {{ _hec.json.text | default('') }}"
+          services: "{{ _svc.stdout_lines }}"
+          kafka_lag: "{{ _lag.stdout_lines | default([]) }}"
+          logstash_events: >-
+            {{ _ls.json.pipelines | default({}) | dict2items
+               | map(attribute='value.events') | list }}

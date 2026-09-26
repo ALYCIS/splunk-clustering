@@ -1,0 +1,43 @@
+---
+# Bonne pratique "base configs" : chaque réglage vit dans une app nommée org_*,
+# jamais dans etc/system/local (sauf ce que Splunk y écrit lui-même).
+
+- name: Répertoires des apps de base
+  ansible.builtin.file:
+    path: "{{ splunk_home }}/etc/apps/{{ item }}/local"
+    state: directory
+    owner: "{{ splunk_user }}"
+    group: "{{ splunk_user }}"
+    mode: "0755"
+  loop:
+    - org_all_license_peer
+    - org_all_forwarder_outputs
+
+- name: Rattachement au License Manager (si une licence centrale est fournie)
+  ansible.builtin.copy:
+    dest: "{{ splunk_home }}/etc/apps/org_all_license_peer/local/server.conf"
+    owner: "{{ splunk_user }}"
+    group: "{{ splunk_user }}"
+    mode: "0644"
+    content: |
+      [license]
+      manager_uri = {{ license_manager_uri }}
+  when:
+    - splunk_license_file | length > 0
+    - inventory_hostname not in groups['license_manager']
+  notify: restart splunk
+
+# Les instances qui n'indexent pas (CM, deployer, SH hors SHC) envoient leurs logs
+# internes (_internal, _audit...) vers les indexeurs : tout est cherchable au même endroit.
+# Les membres de SHC reçoivent la même app via le Deployer (playbooks/deploy_bundles.yml).
+- name: Transfert des logs internes vers les indexeurs
+  ansible.builtin.template:
+    src: forwarder_outputs.conf.j2
+    dest: "{{ splunk_home }}/etc/apps/org_all_forwarder_outputs/local/outputs.conf"
+    owner: "{{ splunk_user }}"
+    group: "{{ splunk_user }}"
+    mode: "0644"
+  when:
+    - inventory_hostname not in groups['indexers']
+    - not (shc_enabled and inventory_hostname in groups['search_heads'])
+  notify: restart splunk

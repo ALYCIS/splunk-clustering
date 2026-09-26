@@ -1,0 +1,4 @@
+---
+# Ports ouverts sur toutes les instances Splunk (matrice des flux : docs/01 §4.1)
+firewall_ports_splunk:
+  - 8089/tcp   # splunkd : REST / gestion / recherche distribuée

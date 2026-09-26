@@ -1,0 +1,6 @@
+# {{ ansible_managed }}
+[replication_port://{{ idxc_replication_port }}]
+
+[clustering]
+mode = peer
+manager_uri = {{ cluster_manager_uri }}

@@ -1,0 +1,11 @@
+---
+firewall_ports:
+  - 514/udp    # syslog UDP -> SC4S
+  - 514/tcp    # syslog TCP -> SC4S
+  - 601/tcp    # syslog RFC 5424 (IETF) -> SC4S
+  - 6514/tcp   # syslog TLS -> SC4S
+  - 5140/udp   # port dédié (ex. Cisco ASA)
+  - 8088/tcp   # LB HEC (HAProxy)
+  - 8404/tcp   # stats HAProxy
+  - 9092/tcp   # Kafka
+  - 9600/tcp   # API monitoring Logstash

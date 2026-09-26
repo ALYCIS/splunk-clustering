@@ -1,0 +1,10 @@
+# {{ ansible_managed }}
+[clustering]
+mode = manager
+replication_factor = {{ idxc_replication_factor }}
+search_factor = {{ idxc_search_factor }}
+cluster_label = {{ idxc_label }}
+
+[indexer_discovery]
+polling_rate = 10
+indexerWeightByDiskCapacity = true

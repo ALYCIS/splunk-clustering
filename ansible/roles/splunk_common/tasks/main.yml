@@ -1,0 +1,9 @@
+---
+- name: Prérequis OS Splunk
+  ansible.builtin.import_tasks: os_tuning.yml
+
+- name: Installation de Splunk Enterprise
+  ansible.builtin.import_tasks: install.yml
+
+- name: Apps de base communes
+  ansible.builtin.import_tasks: base_apps.yml

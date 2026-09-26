@@ -1,0 +1,4 @@
+---
+firewall_ports:
+  - 8089/tcp   # peers, SH, forwarders (indexer discovery), MC
+  - 8000/tcp   # UI (Monitoring Console, page Indexer Clustering)

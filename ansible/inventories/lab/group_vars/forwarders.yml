@@ -1,0 +1,2 @@
+---
+firewall_ports: []   # l'UF n'écoute rien : il initie toutes les connexions (9997, 8089 vers DS/CM)

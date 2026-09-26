@@ -1,0 +1,4 @@
+cisco_asa,index,netfw
+cisco_ios,index,netops
+fortinet_fortios_traffic,index,netfw
+pan_traffic,index,netfw

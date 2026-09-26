@@ -1,0 +1,6 @@
+---
+firewall_ports:
+  - 8089/tcp   # CM + recherches distribuées depuis les SH
+  - 9997/tcp   # S2S depuis les forwarders
+  - 9887/tcp   # réplication inter-peers
+  - 8088/tcp   # HEC (depuis le LB)

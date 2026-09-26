@@ -1,0 +1,50 @@
+---
+# Kafka mono-nœud en mode KRaft (sans Zookeeper), en conteneur.
+# En production : 3 brokers minimum, RF=3, min.insync.replicas=2, TLS + SASL.
+- name: Podman
+  ansible.builtin.package:
+    name: podman
+    state: present
+
+- name: Volume de données Kafka
+  containers.podman.podman_volume:
+    name: kafka-data
+    state: present
+
+- name: Conteneur Kafka (KRaft broker+controller)
+  containers.podman.podman_container:
+    name: kafka
+    image: "{{ kafka_image }}"
+    state: started
+    network: host
+    restart_policy: always
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    env:
+      KAFKA_NODE_ID: "1"
+      KAFKA_PROCESS_ROLES: "broker,controller"
+      KAFKA_LISTENERS: "PLAINTEXT://:9092,CONTROLLER://:9093"
+      KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://{{ inventory_hostname }}:9092"
+      KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT"
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@localhost:9093"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: "0"
+      KAFKA_LOG_DIRS: "/var/lib/kafka/data"
+      KAFKA_LOG_RETENTION_HOURS: "72"   # tampon de 3 jours si Splunk est indisponible
+
+- name: Attente du broker
+  ansible.builtin.wait_for:
+    port: 9092
+    timeout: 120
+
+- name: Création des topics
+  ansible.builtin.command: >-
+    podman exec kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092
+    --create --if-not-exists --topic {{ item.name }}
+    --partitions {{ item.partitions }} --replication-factor 1
+  loop: "{{ kafka_topics }}"
+  register: _topic
+  changed_when: "'Created topic' in _topic.stdout"

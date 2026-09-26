@@ -1,0 +1,13 @@
+# {{ ansible_managed }}
+# Indexer discovery : l'UF demande au Cluster Manager la liste des peers disponibles
+# (et leur poids selon l'espace disque). Ajout/retrait d'indexeur => aucune modif côté UF.
+[indexer_discovery:idxc]
+pass4SymmKey = {{ idxc_secret }}
+manager_uri = {{ cluster_manager_uri }}
+
+[tcpout:idxc_group]
+indexerDiscovery = idxc
+useACK = true
+
+[tcpout]
+defaultGroup = idxc_group

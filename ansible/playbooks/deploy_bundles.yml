@@ -1,0 +1,187 @@
+---
+# Déploiement des apps Splunk versionnées dans splunk-apps/ :
+#   --tags idxc : manager-apps     -> Cluster Manager -> apply cluster-bundle   -> indexeurs
+#   --tags shc  : shcluster-apps   -> Deployer        -> apply shcluster-bundle -> search heads
+#   --tags ds   : deployment-apps  -> Deployment Server -> reload deploy-server -> forwarders
+# Les fichiers contenant des secrets (tokens HEC, pass4SymmKey) sont générés ici depuis
+# Vault/secrets : ils ne sont JAMAIS dans Git.
+
+# =========================================================== Indexer cluster
+- name: Configuration bundle du cluster d'indexeurs
+  hosts: cluster_manager
+  tags: [idxc]
+  vars:
+    _auth: "-auth admin:{{ splunk_admin_password }}"
+  tasks:
+    - name: Apps versionnées -> etc/manager-apps
+      ansible.builtin.copy:
+        src: "{{ repo_root }}/splunk-apps/manager-apps/"
+        dest: "{{ splunk_home }}/etc/manager-apps/"
+        owner: "{{ splunk_user }}"
+        group: "{{ splunk_user }}"
+        mode: "0644"
+        directory_mode: "0755"
+      register: _apps
+
+    - name: Répertoire de l'app des tokens HEC
+      ansible.builtin.file:
+        path: "{{ splunk_home }}/etc/manager-apps/org_hec_inputs/local"
+        state: directory
+        owner: "{{ splunk_user }}"
+        group: "{{ splunk_user }}"
+        mode: "0755"
+
+    - name: Tokens HEC (identiques sur tous les indexeurs => via le bundle)
+      ansible.builtin.template:
+        src: templates/hec_inputs.conf.j2
+        dest: "{{ splunk_home }}/etc/manager-apps/org_hec_inputs/local/inputs.conf"
+        owner: "{{ splunk_user }}"
+        group: "{{ splunk_user }}"
+        mode: "0600"
+      register: _hec
+      no_log: true
+
+    - name: Validation du bundle
+      ansible.builtin.command: "{{ splunk_home }}/bin/splunk validate cluster-bundle --check-restart {{ _auth }}"
+      become: true
+      become_user: "{{ splunk_user }}"
+      when: _apps is changed or _hec is changed
+      no_log: true
+      changed_when: true
+
+    - name: Attente de la fin de validation
+      ansible.builtin.command: "{{ splunk_home }}/bin/splunk show cluster-bundle-status {{ _auth }}"
+      become: true
+      become_user: "{{ splunk_user }}"
+      register: _bs
+      until: "'cluster_status=None' in _bs.stdout"
+      retries: 30
+      delay: 10
+      changed_when: false
+      when: _apps is changed or _hec is changed
+      no_log: true
+
+    - name: Application du bundle (rolling restart des peers si nécessaire)
+      ansible.builtin.command: "{{ splunk_home }}/bin/splunk apply cluster-bundle --answer-yes {{ _auth }}"
+      become: true
+      become_user: "{{ splunk_user }}"
+      when: _apps is changed or _hec is changed
+      no_log: true
+      changed_when: true
+
+    - name: Attente de la fin du déploiement
+      ansible.builtin.command: "{{ splunk_home }}/bin/splunk show cluster-bundle-status {{ _auth }}"
+      become: true
+      become_user: "{{ splunk_user }}"
+      register: _bs
+      until: "'cluster_status=None' in _bs.stdout"
+      retries: 60
+      delay: 15
+      changed_when: false
+      when: _apps is changed or _hec is changed
+      no_log: true
+
+# ======================================================= Search head cluster
+- name: Bundle du Search Head Cluster
+  hosts: shc_deployer
+  tags: [shc]
+  tasks:
+    - name: Apps versionnées -> etc/shcluster/apps
+      ansible.builtin.copy:
+        src: "{{ repo_root }}/splunk-apps/shcluster-apps/"
+        dest: "{{ splunk_home }}/etc/shcluster/apps/"
+        owner: "{{ splunk_user }}"
+        group: "{{ splunk_user }}"
+        mode: "0644"
+        directory_mode: "0755"
+      register: _apps
+
+    - name: Répertoire outputs des SH
+      ansible.builtin.file:
+        path: "{{ splunk_home }}/etc/shcluster/apps/org_all_forwarder_outputs/local"
+        state: directory
+        owner: "{{ splunk_user }}"
+        group: "{{ splunk_user }}"
+        mode: "0755"
+
+    - name: Les SH envoient leurs logs internes aux indexeurs
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../roles/splunk_common/templates/forwarder_outputs.conf.j2"
+        dest: "{{ splunk_home }}/etc/shcluster/apps/org_all_forwarder_outputs/local/outputs.conf"
+        owner: "{{ splunk_user }}"
+        group: "{{ splunk_user }}"
+        mode: "0644"
+      register: _out
+
+    - name: splunk apply shcluster-bundle
+      ansible.builtin.command: >-
+        {{ splunk_home }}/bin/splunk apply shcluster-bundle
+        -target https://{{ groups['search_heads'][0] }}:{{ splunk_mgmt_port }}
+        --answer-yes -auth admin:{{ splunk_admin_password }}
+      become: true
+      become_user: "{{ splunk_user }}"
+      when: shc_enabled and (_apps is changed or _out is changed)
+      no_log: true
+      changed_when: true
+
+- name: Apps sur un search head autonome (profil léger, sans SHC)
+  hosts: search_heads
+  tags: [shc]
+  tasks:
+    - name: Apps -> etc/apps
+      ansible.builtin.copy:
+        src: "{{ repo_root }}/splunk-apps/shcluster-apps/"
+        dest: "{{ splunk_home }}/etc/apps/"
+        owner: "{{ splunk_user }}"
+        group: "{{ splunk_user }}"
+        mode: "0644"
+        directory_mode: "0755"
+      when: not shc_enabled
+      register: _apps
+
+    - name: Redémarrage  # noqa: no-handler
+      ansible.builtin.systemd:
+        name: "{{ splunk_service }}"
+        state: restarted
+      when: _apps is changed
+
+# ========================================================= Deployment Server
+- name: Apps des forwarders
+  hosts: deployment_server
+  tags: [ds]
+  tasks:
+    - name: Apps versionnées -> etc/deployment-apps
+      ansible.builtin.copy:
+        src: "{{ repo_root }}/splunk-apps/deployment-apps/"
+        dest: "{{ splunk_home }}/etc/deployment-apps/"
+        owner: "{{ splunk_user }}"
+        group: "{{ splunk_user }}"
+        mode: "0644"
+        directory_mode: "0755"
+      register: _apps
+
+    - name: Répertoire outputs des forwarders
+      ansible.builtin.file:
+        path: "{{ splunk_home }}/etc/deployment-apps/org_all_forwarder_outputs/local"
+        state: directory
+        owner: "{{ splunk_user }}"
+        group: "{{ splunk_user }}"
+        mode: "0755"
+
+    - name: Outputs des forwarders en "indexer discovery" (liste des peers fournie par le CM)
+      ansible.builtin.template:
+        src: templates/uf_outputs.conf.j2
+        dest: "{{ splunk_home }}/etc/deployment-apps/org_all_forwarder_outputs/local/outputs.conf"
+        owner: "{{ splunk_user }}"
+        group: "{{ splunk_user }}"
+        mode: "0600"
+      register: _out
+      no_log: true
+
+    - name: splunk reload deploy-server
+      ansible.builtin.command: "{{ splunk_home }}/bin/splunk reload deploy-server -auth admin:{{ splunk_admin_password }}"
+      become: true
+      become_user: "{{ splunk_user }}"
+      when: _apps is changed or _out is changed
+      no_log: true
+      changed_when: true

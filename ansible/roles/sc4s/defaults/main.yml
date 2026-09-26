@@ -1,0 +1,3 @@
+---
+sc4s_tls_verify: "no"          # "yes" en production (CA de la PKI Vault montée dans /opt/sc4s/tls)
+sc4s_extra_env: {}              # ex. { SC4S_LISTEN_CISCO_ASA_UDP_PORT: 5140 }

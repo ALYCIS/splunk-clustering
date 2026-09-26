@@ -1,0 +1,93 @@
+---
+# ---------------------------------------------------------------------------
+# Environnement
+# ---------------------------------------------------------------------------
+env_name: lab
+lab_domain: lab.local
+
+# ---------------------------------------------------------------------------
+# Binaires Splunk
+# ---------------------------------------------------------------------------
+splunk_version: "9.4.3"                                   # à adapter au .tgz téléchargé
+splunk_package: "splunk-9.4.3-237ebbd22314-Linux-x86_64.tgz"
+splunk_uf_package: "splunkforwarder-9.4.3-237ebbd22314-Linux-x86_64.tgz"
+
+# local       : binaires pris dans ansible/files/
+# artifactory : binaires téléchargés depuis Artifactory (cas réel en entreprise, sans Internet)
+splunk_download_from: local
+artifactory_url: "http://ops01:8082/artifactory"
+artifactory_repo: splunk-generic
+
+splunk_home: /opt/splunk
+splunk_uf_home: /opt/splunkforwarder
+splunk_user: splunk
+splunk_service: Splunkd
+splunk_uf_service: SplunkForwarder
+splunk_mgmt_port: 8089
+
+# Fichier de licence optionnel (Developer / Enterprise) dans ansible/files/.
+# Sans licence, chaque nœud garde sa licence Trial 60 jours (suffisant pour le lab).
+splunk_license_file: ""
+
+# ---------------------------------------------------------------------------
+# Topologie Splunk (tout est dérivé de l'inventaire => rien à coder en dur)
+# ---------------------------------------------------------------------------
+cluster_manager_host: "{{ groups['cluster_manager'][0] }}"
+cluster_manager_uri: "https://{{ cluster_manager_host }}:{{ splunk_mgmt_port }}"
+license_manager_uri: "https://{{ groups['license_manager'][0] }}:{{ splunk_mgmt_port }}"
+shc_deployer_uri: "https://{{ groups['shc_deployer'][0] }}:{{ splunk_mgmt_port }}"
+deployment_server_host: "{{ groups['deployment_server'][0] }}"
+
+# Indexer cluster
+idxc_label: "{{ env_name }}_idxc"
+idxc_replication_factor: 3
+idxc_search_factor: 2
+idxc_replication_port: 9887
+splunk_s2s_port: 9997
+splunk_hec_port: 8088
+
+# Search head cluster
+shc_enabled: true            # false => un seul search head autonome (profil "léger")
+shc_label: "{{ env_name }}_shc"
+shc_replication_factor: 3
+shc_replication_port: 9200
+
+# Réécrire les secrets déjà présents dans les .conf (rotation).
+# splunkd chiffre pass4SymmKey au démarrage : sans ce garde-fou, chaque exécution
+# d'Ansible verrait une différence et redémarrerait Splunk (perte d'idempotence).
+splunk_rotate_secrets: false
+
+# ---------------------------------------------------------------------------
+# Ingestion
+# ---------------------------------------------------------------------------
+hec_lb_url: "https://{{ groups['hec_lb'][0] }}:{{ splunk_hec_port }}"
+kafka_bootstrap: "{{ groups['kafka'][0] }}:9092"
+kafka_topics:
+  - { name: app-logs, partitions: 3 }
+sc4s_image: "ghcr.io/splunk/splunk-connect-for-syslog/container3:3"
+kafka_image: "docker.io/apache/kafka:3.9.1"
+
+# ---------------------------------------------------------------------------
+# Secrets
+#   local           : group_vars/all/secrets.yml (copie de secrets.yml.example, hors Git)
+#   hashicorp_vault : lecture dans Vault KV v2  secret/splunk/<env_name>
+#                     auth AppRole via ANSIBLE_HASHI_VAULT_ROLE_ID / ANSIBLE_HASHI_VAULT_SECRET_ID
+# ---------------------------------------------------------------------------
+secrets_backend: local
+vault_addr: "http://ops01:8200"
+vault_kv_mount: secret
+vault_secret_path: "splunk/{{ env_name }}"
+
+_secrets: >-
+  {{ lookup('community.hashi_vault.vault_kv2_get', vault_secret_path,
+            engine_mount_point=vault_kv_mount, url=vault_addr, auth_method='approle').secret
+     if secrets_backend == 'hashicorp_vault' else lab_secrets }}
+
+splunk_admin_password: "{{ _secrets.admin_password }}"
+idxc_secret: "{{ _secrets.idxc_pass4symmkey }}"
+shc_secret: "{{ _secrets.shc_pass4symmkey }}"
+hec_token_sc4s: "{{ _secrets.hec_token_sc4s }}"
+hec_token_logstash: "{{ _secrets.hec_token_logstash }}"
+
+# Racine du dépôt (apps Splunk, pipelines Logstash, conf SC4S sont versionnés hors d'ansible/)
+repo_root: "{{ playbook_dir }}/../.."

@@ -1,0 +1,18 @@
+# {{ ansible_managed }}
+[global]
+restartSplunkd = false
+
+# --- Tous les forwarders : sortie vers le cluster (indexer discovery) ---
+[serverClass:all_forwarders]
+whitelist.0 = *
+
+[serverClass:all_forwarders:app:org_all_forwarder_outputs]
+restartSplunkd = true
+
+# --- Serveurs Linux : collecte des logs système ---
+[serverClass:linux_servers]
+whitelist.0 = lnx*
+machineTypesFilter = linux-x86_64
+
+[serverClass:linux_servers:app:org_linux_inputs]
+restartSplunkd = true

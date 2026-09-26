@@ -1,0 +1,72 @@
+<dashboard version="1.1" theme="dark">
+  <label>Vue d'ensemble de l'ingestion</label>
+  <description>Volumes par index / sourcetype, latence d'indexation, santé de la chaîne SC4S / Kafka / Logstash</description>
+  <fieldset submitButton="false">
+    <input type="time" token="t">
+      <label>Période</label>
+      <default><earliest>-4h</earliest><latest>now</latest></default>
+    </input>
+  </fieldset>
+  <row>
+    <panel>
+      <title>Événements par index</title>
+      <chart>
+        <search>
+          <query>| tstats count where index=* index!=_* by _time, index span=5m | timechart span=5m sum(count) by index</query>
+          <earliest>$t.earliest$</earliest><latest>$t.latest$</latest>
+        </search>
+        <option name="charting.chart">area</option>
+        <option name="charting.chart.stackMode">stacked</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>Latence d'indexation (s) par sourcetype</title>
+      <table>
+        <search>
+          <query>index=* index!=_* | eval lag=_indextime-_time | stats count avg(lag) as avg_lag p95(lag) as p95_lag max(lag) as max_lag by sourcetype | sort - p95_lag</query>
+          <earliest>-15m</earliest><latest>now</latest>
+        </search>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Heartbeat Logstash (1 événement / 30 s attendu)</title>
+      <chart>
+        <search>
+          <query>index=app_heartbeat | timechart span=1m count by host</query>
+          <earliest>$t.earliest$</earliest><latest>$t.latest$</latest>
+        </search>
+      </chart>
+    </panel>
+    <panel>
+      <title>Sources syslog (SC4S) : top produits</title>
+      <table>
+        <search>
+          <query>| tstats count where index=net* OR index=os* OR index=main by sourcetype, host | sort - count | head 20</query>
+          <earliest>$t.earliest$</earliest><latest>$t.latest$</latest>
+        </search>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Queues bloquées sur les indexeurs</title>
+      <chart>
+        <search>
+          <query>index=_internal source=*metrics.log group=queue blocked=true | timechart span=5m count by host</query>
+          <earliest>$t.earliest$</earliest><latest>$t.latest$</latest>
+        </search>
+      </chart>
+    </panel>
+    <panel>
+      <title>Licence consommée (Go) par index</title>
+      <chart>
+        <search>
+          <query>index=_internal source=*license_usage.log type=Usage | timechart span=1h sum(eval(b/1024/1024/1024)) as GB by idx</query>
+          <earliest>-24h</earliest><latest>now</latest>
+        </search>
+      </chart>
+    </panel>
+  </row>
+</dashboard>

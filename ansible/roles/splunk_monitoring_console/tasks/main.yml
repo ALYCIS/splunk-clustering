@@ -1,0 +1,23 @@
+---
+# Le MC doit pouvoir interroger toutes les instances : on les déclare en search peers.
+# (Les indexeurs du cluster sont vus via le CM.) La finalisation se fait dans l'UI :
+# Monitoring Console > Settings > General Setup > Distributed > Apply changes.
+- name: Search peers déjà déclarés
+  ansible.builtin.command: "{{ splunk_home }}/bin/splunk list search-server -auth admin:{{ splunk_admin_password }}"
+  become: true
+  become_user: "{{ splunk_user }}"
+  register: _mc_peers
+  changed_when: false
+  no_log: true
+
+- name: Ajout des instances non-indexeurs comme search peers du MC
+  ansible.builtin.command: >-
+    {{ splunk_home }}/bin/splunk add search-server https://{{ item }}:{{ splunk_mgmt_port }}
+    -auth admin:{{ splunk_admin_password }}
+    -remoteUsername admin -remotePassword {{ splunk_admin_password }}
+  become: true
+  become_user: "{{ splunk_user }}"
+  loop: "{{ (groups['search_heads'] + groups['shc_deployer'] + groups['deployment_server']) | unique | difference([inventory_hostname]) }}"
+  when: item not in _mc_peers.stdout
+  no_log: true
+  changed_when: true

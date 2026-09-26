@@ -1,0 +1,35 @@
+---
+- name: Répertoire de l'app de configuration du Deployer
+  ansible.builtin.file:
+    path: "{{ splunk_home }}/etc/apps/org_shc_deployer_secrets/local"
+    state: directory
+    owner: "{{ splunk_user }}"
+    group: "{{ splunk_user }}"
+    mode: "0755"
+
+# Le Deployer doit connaître le label et le secret du SHC pour pousser les bundles
+- name: Identité du SHC sur le Deployer
+  ansible.builtin.copy:
+    dest: "{{ splunk_home }}/etc/apps/org_shc_deployer_secrets/local/server.conf"
+    owner: "{{ splunk_user }}"
+    group: "{{ splunk_user }}"
+    mode: "0600"
+    force: "{{ splunk_rotate_secrets }}"
+    content: |
+      [shclustering]
+      pass4SymmKey = {{ shc_secret }}
+      shcluster_label = {{ shc_label }}
+  no_log: true
+  notify: restart splunk
+  when: shc_enabled
+
+- name: Répertoire des apps à pousser
+  ansible.builtin.file:
+    path: "{{ splunk_home }}/etc/shcluster/apps"
+    state: directory
+    owner: "{{ splunk_user }}"
+    group: "{{ splunk_user }}"
+    mode: "0755"
+
+- name: Application
+  ansible.builtin.meta: flush_handlers

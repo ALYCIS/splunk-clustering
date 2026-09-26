@@ -1,0 +1,8 @@
+---
+# Noms de tâches en français, commandes Splunk en minuscules : "splunk apply cluster-bundle"
+skip_list:
+  - name[casing]
+  # Variables internes préfixées par "_" (convention du dépôt)
+  - var-naming[no-role-prefix]
+exclude_paths:
+  - files/

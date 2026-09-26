@@ -1,0 +1,11 @@
+# Instance AWX déployée par l'awx-operator (k3s sur ops01) — équivalent open source d'AAP Controller
+---
+apiVersion: awx.ansible.com/v1beta1
+kind: AWX
+metadata:
+  name: awx
+  namespace: awx
+spec:
+  service_type: nodeport
+  nodeport_port: 30080
+  admin_user: admin

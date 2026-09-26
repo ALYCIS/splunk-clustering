@@ -1,0 +1,17 @@
+---
+- name: Répertoire deployment-apps
+  ansible.builtin.file:
+    path: "{{ splunk_home }}/etc/deployment-apps"
+    state: directory
+    owner: "{{ splunk_user }}"
+    group: "{{ splunk_user }}"
+    mode: "0755"
+
+- name: Server classes (qui reçoit quelles apps)
+  ansible.builtin.template:
+    src: serverclass.conf.j2
+    dest: "{{ splunk_home }}/etc/system/local/serverclass.conf"
+    owner: "{{ splunk_user }}"
+    group: "{{ splunk_user }}"
+    mode: "0644"
+  notify: reload deploy-server

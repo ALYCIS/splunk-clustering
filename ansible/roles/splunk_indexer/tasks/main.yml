@@ -1,0 +1,45 @@
+---
+- name: Répertoires des apps d'indexeur
+  ansible.builtin.file:
+    path: "{{ splunk_home }}/etc/apps/{{ item }}/local"
+    state: directory
+    owner: "{{ splunk_user }}"
+    group: "{{ splunk_user }}"
+    mode: "0755"
+  loop: [org_cluster_indexer_base, org_cluster_indexer_secrets]
+
+- name: Mode peer + port de réplication
+  ansible.builtin.template:
+    src: server_base.conf.j2
+    dest: "{{ splunk_home }}/etc/apps/org_cluster_indexer_base/local/server.conf"
+    owner: "{{ splunk_user }}"
+    group: "{{ splunk_user }}"
+    mode: "0644"
+  notify: restart splunk
+
+- name: Pas d'interface web sur les indexeurs (bonne pratique)
+  ansible.builtin.copy:
+    dest: "{{ splunk_home }}/etc/apps/org_cluster_indexer_base/local/web.conf"
+    owner: "{{ splunk_user }}"
+    group: "{{ splunk_user }}"
+    mode: "0644"
+    content: |
+      [settings]
+      startwebserver = 0
+  notify: restart splunk
+
+- name: Secret du cluster
+  ansible.builtin.copy:
+    dest: "{{ splunk_home }}/etc/apps/org_cluster_indexer_secrets/local/server.conf"
+    owner: "{{ splunk_user }}"
+    group: "{{ splunk_user }}"
+    mode: "0600"
+    force: "{{ splunk_rotate_secrets }}"
+    content: |
+      [clustering]
+      pass4SymmKey = {{ idxc_secret }}
+  no_log: true
+  notify: restart splunk
+
+- name: Application immédiate (le peer rejoint le cluster)
+  ansible.builtin.meta: flush_handlers

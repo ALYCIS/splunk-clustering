@@ -1,0 +1,33 @@
+# {{ ansible_managed }}
+# Load balancer HEC : TLS "passthrough" (mode tcp), health-check HTTP sur chaque indexeur.
+global
+    log         127.0.0.1 local2
+    maxconn     4000
+    daemon
+
+defaults
+    log     global
+    timeout connect 5s
+    timeout client  60s
+    timeout server  60s
+
+frontend hec_in
+    bind *:{{ splunk_hec_port }}
+    mode tcp
+    default_backend hec_indexers
+
+backend hec_indexers
+    mode tcp
+    balance roundrobin
+    option httpchk GET /services/collector/health
+    http-check expect status 200
+{% for h in groups['indexers'] %}
+    server {{ h }} {{ h }}:{{ splunk_hec_port }} check check-ssl verify none inter 5s fall 3 rise 2
+{% endfor %}
+
+listen stats
+    bind *:8404
+    mode http
+    stats enable
+    stats uri /stats
+    stats refresh 10s

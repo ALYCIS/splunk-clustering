@@ -1,0 +1,70 @@
+---
+- name: Membre déjà initialisé ?
+  ansible.builtin.command: "grep -q '^conf_deploy_fetch_url' {{ splunk_home }}/etc/system/local/server.conf"
+  register: _shc_init
+  changed_when: false
+  failed_when: false
+
+- name: splunk init shcluster-config
+  ansible.builtin.command: >-
+    {{ splunk_home }}/bin/splunk init shcluster-config
+    -auth admin:{{ splunk_admin_password }}
+    -mgmt_uri https://{{ inventory_hostname }}:{{ splunk_mgmt_port }}
+    -replication_port {{ shc_replication_port }}
+    -replication_factor {{ shc_replication_factor }}
+    -conf_deploy_fetch_url {{ shc_deployer_uri }}
+    -secret {{ shc_secret }}
+    -shcluster_label {{ shc_label }}
+  become: true
+  become_user: "{{ splunk_user }}"
+  when: _shc_init.rc != 0
+  register: _shc_init_done
+  no_log: true
+  changed_when: true
+
+- name: Redémarrage après init  # noqa: no-handler
+  ansible.builtin.systemd:
+    name: "{{ splunk_service }}"
+    state: restarted
+  when: _shc_init_done is changed
+
+- name: Attente splunkd
+  ansible.builtin.wait_for:
+    port: "{{ splunk_mgmt_port }}"
+    delay: 10
+    timeout: 300
+
+- name: Un captain existe déjà ?
+  ansible.builtin.command: "{{ splunk_home }}/bin/splunk show shcluster-status -auth admin:{{ splunk_admin_password }}"
+  become: true
+  become_user: "{{ splunk_user }}"
+  register: _shc_status
+  changed_when: false
+  failed_when: false
+  run_once: true
+  no_log: true
+
+# Le captain initial est élu parmi la liste ; ensuite l'élection est dynamique (Raft).
+- name: splunk bootstrap shcluster-captain
+  ansible.builtin.command: >-
+    {{ splunk_home }}/bin/splunk bootstrap shcluster-captain
+    -servers_list "{{ groups['search_heads'] | map('regex_replace', '^', 'https://') | map('regex_replace', '$', ':' ~ splunk_mgmt_port) | join(',') }}"
+    -auth admin:{{ splunk_admin_password }}
+  become: true
+  become_user: "{{ splunk_user }}"
+  run_once: true
+  when: "'elected_captain' not in _shc_status.stdout"
+  no_log: true
+  changed_when: true
+
+- name: Attente que le SHC soit prêt (service_ready_flag)
+  ansible.builtin.command: "{{ splunk_home }}/bin/splunk show shcluster-status -auth admin:{{ splunk_admin_password }}"
+  become: true
+  become_user: "{{ splunk_user }}"
+  register: _shc_ready
+  until: "'service_ready_flag : 1' in _shc_ready.stdout"
+  retries: 30
+  delay: 20
+  changed_when: false
+  run_once: true
+  no_log: true

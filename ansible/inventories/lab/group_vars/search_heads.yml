@@ -1,0 +1,6 @@
+---
+firewall_ports:
+  - 8000/tcp   # Splunk Web
+  - 8089/tcp   # REST, captain <-> membres, deployer
+  - 9200/tcp   # réplication SHC
+  - 8191/tcp   # KV store

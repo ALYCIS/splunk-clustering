@@ -1,0 +1,75 @@
+---
+# Tâches réutilisées pour Splunk Enterprise ET l'Universal Forwarder
+# (variables _splunk_home / _splunk_package / _splunk_service).
+- name: Splunk déjà installé ?
+  ansible.builtin.stat:
+    path: "{{ _splunk_home }}/bin/splunk"
+  register: _splunk_bin
+
+- name: Installation initiale
+  when: not _splunk_bin.stat.exists
+  block:
+    - name: Copie du paquet depuis le contrôleur Ansible
+      ansible.builtin.copy:
+        src: "{{ _splunk_package }}"
+        dest: "/tmp/{{ _splunk_package }}"
+        mode: "0644"
+      when: splunk_download_from == 'local'
+
+    - name: Téléchargement du paquet depuis Artifactory
+      ansible.builtin.get_url:
+        url: "{{ artifactory_url }}/{{ artifactory_repo }}/splunk/{{ _splunk_package }}"
+        dest: "/tmp/{{ _splunk_package }}"
+        mode: "0644"
+      when: splunk_download_from == 'artifactory'
+
+    - name: Extraction dans /opt
+      ansible.builtin.unarchive:
+        src: "/tmp/{{ _splunk_package }}"
+        dest: /opt
+        remote_src: true
+        owner: "{{ splunk_user }}"
+        group: "{{ splunk_user }}"
+
+    - name: Compte admin initial (user-seed.conf, supprimé par Splunk au 1er démarrage)
+      ansible.builtin.copy:
+        dest: "{{ _splunk_home }}/etc/system/local/user-seed.conf"
+        owner: "{{ splunk_user }}"
+        group: "{{ splunk_user }}"
+        mode: "0600"
+        content: |
+          [user_info]
+          USERNAME = admin
+          PASSWORD = {{ splunk_admin_password }}
+      no_log: true
+
+    - name: Premier démarrage (acceptation licence, génération des certificats)
+      ansible.builtin.command: "{{ _splunk_home }}/bin/splunk start --accept-license --answer-yes --no-prompt"
+      become: true
+      become_user: "{{ splunk_user }}"
+      changed_when: true
+
+    - name: Arrêt avant passage sous systemd
+      ansible.builtin.command: "{{ _splunk_home }}/bin/splunk stop"
+      become: true
+      become_user: "{{ splunk_user }}"
+      changed_when: true
+
+    - name: Démarrage automatique géré par systemd
+      ansible.builtin.command: >-
+        {{ _splunk_home }}/bin/splunk enable boot-start -user {{ splunk_user }}
+        -systemd-managed 1 --accept-license --answer-yes --no-prompt
+      args:
+        creates: "/etc/systemd/system/{{ _splunk_service }}.service"
+
+- name: Service Splunk démarré
+  ansible.builtin.systemd:
+    name: "{{ _splunk_service }}"
+    state: started
+    enabled: true
+    daemon_reload: true
+
+- name: Attente du port de management
+  ansible.builtin.wait_for:
+    port: "{{ splunk_mgmt_port }}"
+    timeout: 300

@@ -1,0 +1,89 @@
+---
+# Mise à jour de version du cluster d'indexeurs (procédure "rolling upgrade" Splunk).
+#   1. mettre à jour splunk_version / splunk_package dans l'inventaire (DEV d'abord !)
+#   2. ansible-playbook playbooks/rolling_upgrade_indexers.yml
+# Ordre complet d'une montée de version : CM/LM -> SHC -> indexeurs -> DS/HF -> UF.
+
+- name: Upgrade du Cluster Manager + préparation
+  hosts: cluster_manager
+  vars:
+    _auth: "-auth admin:{{ splunk_admin_password }}"
+  tasks:
+    - name: Upgrade du binaire du CM
+      ansible.builtin.include_tasks: tasks/upgrade_node.yml
+
+    - name: Mode maintenance (pas de bucket fixup pendant l'opération)
+      ansible.builtin.command: "{{ splunk_home }}/bin/splunk enable maintenance-mode --answer-yes {{ _auth }}"
+      become: true
+      become_user: "{{ splunk_user }}"
+      no_log: true
+      changed_when: true
+
+    - name: Début du rolling upgrade
+      ansible.builtin.command: "{{ splunk_home }}/bin/splunk upgrade-init cluster-peers {{ _auth }}"
+      become: true
+      become_user: "{{ splunk_user }}"
+      no_log: true
+      changed_when: true
+
+- name: Upgrade des indexeurs, UN PAR UN
+  hosts: indexers
+  serial: 1
+  tasks:
+    - name: Mise hors ligne propre du peer (termine les recherches en cours, transfère les primaires)
+      ansible.builtin.command: "{{ splunk_home }}/bin/splunk offline -auth admin:{{ splunk_admin_password }}"
+      become: true
+      become_user: "{{ splunk_user }}"
+      no_log: true
+      changed_when: true
+
+    - name: Upgrade du binaire
+      ansible.builtin.include_tasks: tasks/upgrade_node.yml
+
+    - name: Attente que le CM voie de nouveau ce peer "Up"
+      ansible.builtin.uri:
+        url: "https://localhost:{{ splunk_mgmt_port }}/services/cluster/manager/peers?output_mode=json&count=0"
+        user: admin
+        password: "{{ splunk_admin_password }}"
+        force_basic_auth: true
+        validate_certs: false
+      delegate_to: "{{ cluster_manager_host }}"
+      register: _peers
+      until: >-
+        _peers.json is defined and
+        (_peers.json.entry | selectattr('content.label', 'equalto', inventory_hostname)
+                           | selectattr('content.status', 'equalto', 'Up') | list | length) == 1
+      retries: 40
+      delay: 15
+      no_log: true
+
+- name: Fin du rolling upgrade
+  hosts: cluster_manager
+  vars:
+    _auth: "-auth admin:{{ splunk_admin_password }}"
+  tasks:
+    - name: upgrade-finalize
+      ansible.builtin.command: "{{ splunk_home }}/bin/splunk upgrade-finalize cluster-peers {{ _auth }}"
+      become: true
+      become_user: "{{ splunk_user }}"
+      no_log: true
+      changed_when: true
+
+    - name: Sortie du mode maintenance
+      ansible.builtin.command: "{{ splunk_home }}/bin/splunk disable maintenance-mode {{ _auth }}"
+      become: true
+      become_user: "{{ splunk_user }}"
+      no_log: true
+      changed_when: true
+
+    - name: État final
+      ansible.builtin.command: "{{ splunk_home }}/bin/splunk show cluster-status {{ _auth }}"
+      become: true
+      become_user: "{{ splunk_user }}"
+      register: _cs
+      changed_when: false
+      no_log: true
+
+    - name: Affichage
+      ansible.builtin.debug:
+        var: _cs.stdout_lines

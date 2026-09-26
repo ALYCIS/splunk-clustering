@@ -1,0 +1,5 @@
+---
+firewall_ports:
+  - 8200/tcp   # Vault API
+  - 8081/tcp   # Artifactory (API)
+  - 8082/tcp   # Artifactory (UI / router)

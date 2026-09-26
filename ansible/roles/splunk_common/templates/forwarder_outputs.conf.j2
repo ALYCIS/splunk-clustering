@@ -1,0 +1,13 @@
+# {{ ansible_managed }}
+# Instances de management / recherche : pas d'indexation locale, tout part vers les indexeurs.
+[indexAndForward]
+index = false
+
+[tcpout]
+defaultGroup = primary_indexers
+forwardedindex.filter.disable = true
+indexAndForward = false
+
+[tcpout:primary_indexers]
+server = {% for h in groups['indexers'] %}{{ h }}:{{ splunk_s2s_port }}{% if not loop.last %},{% endif %}{% endfor %}
+

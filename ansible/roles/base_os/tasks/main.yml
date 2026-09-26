@@ -1,0 +1,34 @@
+---
+# Socle OS commun à toutes les VM du lab
+- name: Résolution de noms du lab (/etc/hosts)
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    regexp: '\s{{ item }}$'
+    line: "{{ hostvars[item].ansible_host }} {{ item }}.{{ lab_domain }} {{ item }}"
+  loop: "{{ groups['all'] }}"
+  when: hostvars[item].ansible_host is defined
+
+- name: Paquets de base
+  ansible.builtin.package:
+    name: [tar, curl, chrony, nc, jq, python3, firewalld]
+    state: present
+
+- name: "Synchronisation horaire (indispensable : Splunk indexe par le temps)"
+  ansible.builtin.service:
+    name: chronyd
+    state: started
+    enabled: true
+
+- name: firewalld actif
+  ansible.builtin.service:
+    name: firewalld
+    state: started
+    enabled: true
+
+- name: Ouverture des ports (matrice de flux, cf. group_vars)
+  ansible.posix.firewalld:
+    port: "{{ item }}"
+    permanent: true
+    immediate: true
+    state: enabled
+  loop: "{{ (firewall_ports | default([])) + (firewall_ports_splunk | default([])) | unique }}"

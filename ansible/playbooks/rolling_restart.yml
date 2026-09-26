@@ -1,0 +1,59 @@
+---
+# Redémarrages sans interruption de service.
+#   --tags idxc : indexeurs via la commande native du CM (respecte RF/SF)
+#   --tags shc  : membres du SHC (le captain orchestre)
+#   --tags mgmt : nœuds de management un par un
+
+- name: Rolling restart des indexeurs (orchestré par le Cluster Manager)
+  hosts: cluster_manager
+  tags: [idxc]
+  tasks:
+    - name: splunk rolling-restart cluster-peers
+      ansible.builtin.command: >-
+        {{ splunk_home }}/bin/splunk rolling-restart cluster-peers
+        -auth admin:{{ splunk_admin_password }}
+      become: true
+      become_user: "{{ splunk_user }}"
+      no_log: true
+      changed_when: true
+
+    - name: Attente de la fin du rolling restart
+      ansible.builtin.command: "{{ splunk_home }}/bin/splunk show cluster-status -auth admin:{{ splunk_admin_password }}"
+      become: true
+      become_user: "{{ splunk_user }}"
+      register: _cs
+      until: "'Rolling restart' not in _cs.stdout and 'Replication factor met' in _cs.stdout"
+      retries: 60
+      delay: 20
+      changed_when: false
+      no_log: true
+
+- name: Rolling restart du Search Head Cluster
+  hosts: "{{ groups['search_heads'][0] }}"
+  tags: [shc]
+  tasks:
+    - name: splunk rolling-restart shcluster-members
+      ansible.builtin.command: >-
+        {{ splunk_home }}/bin/splunk rolling-restart shcluster-members
+        -auth admin:{{ splunk_admin_password }}
+      become: true
+      become_user: "{{ splunk_user }}"
+      when: shc_enabled
+      no_log: true
+      changed_when: true
+
+# Exemple pédagogique de "serial" : un hôte à la fois, on attend qu'il soit revenu.
+- name: Redémarrage un par un des nœuds de management
+  hosts: cluster_manager:shc_deployer:deployment_server
+  tags: [mgmt]
+  serial: 1
+  tasks:
+    - name: Redémarrage
+      ansible.builtin.systemd:
+        name: "{{ splunk_service }}"
+        state: restarted
+    - name: Attente du port de management
+      ansible.builtin.wait_for:
+        port: "{{ splunk_mgmt_port }}"
+        delay: 10
+        timeout: 300

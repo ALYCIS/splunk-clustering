@@ -1,0 +1,12 @@
+---
+- name: restart splunk
+  ansible.builtin.systemd:
+    name: "{{ splunk_service }}"
+    state: restarted
+  notify: wait splunkd
+
+- name: wait splunkd
+  ansible.builtin.wait_for:
+    port: "{{ splunk_mgmt_port }}"
+    delay: 10
+    timeout: 300

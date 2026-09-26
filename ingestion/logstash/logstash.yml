@@ -1,0 +1,15 @@
+# /etc/logstash/logstash.yml — réglages globaux
+path.data: /var/lib/logstash
+path.logs: /var/log/logstash
+
+# Rechargement à chaud des pipelines modifiés (pas de restart lors d'un déploiement)
+config.reload.automatic: true
+config.reload.interval: 30s
+
+# API de monitoring (supervision MCO) : curl localhost:9600/_node/stats/pipelines?pretty
+api.http.host: 0.0.0.0
+api.http.port: 9600
+
+# Queue persistante sur disque : aucun événement perdu si Logstash redémarre
+queue.type: persisted
+queue.max_bytes: 1gb

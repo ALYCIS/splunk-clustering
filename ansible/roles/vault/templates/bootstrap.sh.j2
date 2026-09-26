@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# À lancer après "vault operator init" + "unseal" + "vault login <root token>".
+# Exécute la CLI vault contenue dans le conteneur.
+set -euo pipefail
+v() { podman exec -e VAULT_ADDR=http://127.0.0.1:8200 -e VAULT_TOKEN="${VAULT_TOKEN:?export VAULT_TOKEN=<root token>}" vault vault "$@"; }
+
+# 1. Moteur KV v2
+v secrets list | grep -q '^secret/' || v secrets enable -path=secret kv-v2
+
+# 2. Secrets de l'environnement.
+#    Pour migrer un lab déjà installé avec secrets.yml, exporter d'abord les valeurs existantes
+#    (ADMIN_PASSWORD, IDXC_KEY, SHC_KEY, HEC_SC4S, HEC_LOGSTASH) ; sinon elles sont générées.
+v kv get secret/splunk/{{ env_name }} >/dev/null 2>&1 || v kv put secret/splunk/{{ env_name }} \
+  admin_password="${ADMIN_PASSWORD:-$(openssl rand -base64 18)}" \
+  idxc_pass4symmkey="${IDXC_KEY:-$(openssl rand -hex 16)}" \
+  shc_pass4symmkey="${SHC_KEY:-$(openssl rand -hex 16)}" \
+  hec_token_sc4s="${HEC_SC4S:-$(uuidgen)}" \
+  hec_token_logstash="${HEC_LOGSTASH:-$(uuidgen)}"
+
+# 3. Policy en lecture seule sur les secrets Splunk
+v policy write ansible-splunk - <<'POL'
+path "secret/data/splunk/*"     { capabilities = ["read"] }
+path "secret/metadata/splunk/*" { capabilities = ["read", "list"] }
+POL
+
+# 4. AppRole pour Ansible / AAP
+v auth list | grep -q '^approle/' || v auth enable approle
+v write auth/approle/role/ansible token_policies=ansible-splunk token_ttl=1h token_max_ttl=4h secret_id_ttl=720h
+
+echo "export ANSIBLE_HASHI_VAULT_ROLE_ID=$(v read -field=role_id auth/approle/role/ansible/role-id)"
+echo "export ANSIBLE_HASHI_VAULT_SECRET_ID=$(v write -f -field=secret_id auth/approle/role/ansible/secret-id)"
+
+# 5. Journal d'audit (à collecter dans Splunk)
+v audit list 2>/dev/null | grep -q '^file/' || v audit enable file file_path=/vault/file/audit.log

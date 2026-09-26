@@ -1,0 +1,19 @@
+# {{ ansible_managed }}
+# Généré par Ansible à partir des secrets (Vault). Poussé à tous les indexeurs par le CM.
+[http]
+disabled = 0
+port = {{ splunk_hec_port }}
+enableSSL = 1
+
+[http://sc4s]
+token = {{ hec_token_sc4s }}
+index = main
+indexes = main,email,epav,epintel,fireeye,gitops,infraops,netauth,netdlp,netdns,netfw,netids,netipam,netlb,netops,netwaf,netproxy,netservices,oswin,oswinsec,osnix,print,_metrics,em_metrics
+disabled = 0
+
+[http://logstash]
+token = {{ hec_token_logstash }}
+index = app
+indexes = app,app_heartbeat
+sourcetype = app:json
+disabled = 0

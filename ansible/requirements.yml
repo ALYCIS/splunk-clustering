@@ -1,0 +1,7 @@
+---
+collections:
+  - name: ansible.posix
+  - name: community.general
+  - name: community.hashi_vault
+  - name: containers.podman
+  - name: awx.awx            # configuration d'AWX/AAP "as code" (cicd/aap)

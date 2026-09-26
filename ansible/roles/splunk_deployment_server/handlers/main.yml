@@ -1,0 +1,7 @@
+---
+- name: reload deploy-server
+  ansible.builtin.command: "{{ splunk_home }}/bin/splunk reload deploy-server -auth admin:{{ splunk_admin_password }}"
+  become: true
+  become_user: "{{ splunk_user }}"
+  no_log: true
+  changed_when: true

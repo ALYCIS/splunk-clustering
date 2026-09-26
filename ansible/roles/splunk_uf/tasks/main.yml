@@ -1,0 +1,49 @@
+---
+- name: Prérequis OS
+  ansible.builtin.include_role:
+    name: splunk_common
+    tasks_from: os_tuning.yml
+
+- name: Installation de l'Universal Forwarder (mêmes tâches que Splunk Enterprise)
+  ansible.builtin.include_role:
+    name: splunk_common
+    tasks_from: install.yml
+  vars:
+    _splunk_home: "{{ splunk_uf_home }}"
+    _splunk_package: "{{ splunk_uf_package }}"
+    _splunk_service: "{{ splunk_uf_service }}"
+
+- name: Répertoire de l'app deploymentclient
+  ansible.builtin.file:
+    path: "{{ splunk_uf_home }}/etc/apps/org_all_deploymentclient/local"
+    state: directory
+    owner: "{{ splunk_user }}"
+    group: "{{ splunk_user }}"
+    mode: "0755"
+
+# Seule conf posée par Ansible sur l'UF : "qui est mon Deployment Server".
+# Tout le reste (inputs, outputs) arrive du DS => gestion centralisée de milliers d'agents.
+- name: Rattachement au Deployment Server
+  ansible.builtin.copy:
+    dest: "{{ splunk_uf_home }}/etc/apps/org_all_deploymentclient/local/deploymentclient.conf"
+    owner: "{{ splunk_user }}"
+    group: "{{ splunk_user }}"
+    mode: "0644"
+    content: |
+      [deployment-client]
+      clientName = {{ inventory_hostname }}
+      phoneHomeIntervalInSecs = 60
+
+      [target-broker:deploymentServer]
+      targetUri = {{ deployment_server_host }}:{{ splunk_mgmt_port }}
+  notify: restart uf
+
+- name: Lecture des logs système par l'utilisateur splunk (ACL)
+  ansible.posix.acl:
+    path: "{{ item }}"
+    entity: "{{ splunk_user }}"
+    etype: user
+    permissions: r
+    state: present
+  loop: [/var/log/secure, /var/log/messages]
+  failed_when: false

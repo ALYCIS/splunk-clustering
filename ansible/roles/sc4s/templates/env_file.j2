@@ -1,0 +1,7 @@
+# {{ ansible_managed }}
+SC4S_DEST_SPLUNK_HEC_DEFAULT_URL={{ hec_lb_url }}
+SC4S_DEST_SPLUNK_HEC_DEFAULT_TOKEN={{ hec_token_sc4s }}
+SC4S_DEST_SPLUNK_HEC_DEFAULT_TLS_VERIFY={{ sc4s_tls_verify }}
+{% for k, v in sc4s_extra_env.items() %}
+{{ k }}={{ v }}
+{% endfor %}

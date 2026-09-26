@@ -1,0 +1,2 @@
+---
+vault_image: "docker.io/hashicorp/vault:1.20"

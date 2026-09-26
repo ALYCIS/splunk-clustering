@@ -1,0 +1,10 @@
+# Secrets : jamais dans Git
+ansible/inventories/*/group_vars/all/secrets.yml
+*.License
+.vault-token
+# Binaires
+ansible/files/*.tgz
+*.tgz
+dist/
+.venv/
+__pycache__/

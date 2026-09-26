@@ -1,0 +1,38 @@
+---
+- name: Répertoires des apps du Cluster Manager
+  ansible.builtin.file:
+    path: "{{ splunk_home }}/etc/apps/{{ item }}/local"
+    state: directory
+    owner: "{{ splunk_user }}"
+    group: "{{ splunk_user }}"
+    mode: "0755"
+  loop: [org_cluster_manager_base, org_cluster_manager_secrets]
+
+- name: Mode manager, RF / SF
+  ansible.builtin.template:
+    src: server_base.conf.j2
+    dest: "{{ splunk_home }}/etc/apps/org_cluster_manager_base/local/server.conf"
+    owner: "{{ splunk_user }}"
+    group: "{{ splunk_user }}"
+    mode: "0644"
+  notify: restart splunk
+
+# force: false => écrit une seule fois. splunkd chiffre ensuite la valeur ($7$...).
+- name: Secrets du cluster (pass4SymmKey clustering + indexer discovery)
+  ansible.builtin.copy:
+    dest: "{{ splunk_home }}/etc/apps/org_cluster_manager_secrets/local/server.conf"
+    owner: "{{ splunk_user }}"
+    group: "{{ splunk_user }}"
+    mode: "0600"
+    force: "{{ splunk_rotate_secrets }}"
+    content: |
+      [clustering]
+      pass4SymmKey = {{ idxc_secret }}
+
+      [indexer_discovery]
+      pass4SymmKey = {{ idxc_secret }}
+  no_log: true
+  notify: restart splunk
+
+- name: Application immédiate
+  ansible.builtin.meta: flush_handlers

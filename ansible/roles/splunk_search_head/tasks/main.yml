@@ -1,0 +1,45 @@
+---
+- name: Répertoires des apps de search head
+  ansible.builtin.file:
+    path: "{{ splunk_home }}/etc/apps/{{ item }}/local"
+    state: directory
+    owner: "{{ splunk_user }}"
+    group: "{{ splunk_user }}"
+    mode: "0755"
+  loop: [org_cluster_search_base, org_cluster_search_secrets]
+
+# 1) Rattachement au cluster d'indexeurs : le SH demande au CM la liste des peers
+- name: Mode searchhead vers le Cluster Manager
+  ansible.builtin.copy:
+    dest: "{{ splunk_home }}/etc/apps/org_cluster_search_base/local/server.conf"
+    owner: "{{ splunk_user }}"
+    group: "{{ splunk_user }}"
+    mode: "0644"
+    content: |
+      # {{ ansible_managed }}
+      [clustering]
+      mode = searchhead
+      manager_uri = {{ cluster_manager_uri }}
+  notify: restart splunk
+
+- name: Secret du cluster d'indexeurs
+  ansible.builtin.copy:
+    dest: "{{ splunk_home }}/etc/apps/org_cluster_search_secrets/local/server.conf"
+    owner: "{{ splunk_user }}"
+    group: "{{ splunk_user }}"
+    mode: "0600"
+    force: "{{ splunk_rotate_secrets }}"
+    content: |
+      [clustering]
+      pass4SymmKey = {{ idxc_secret }}
+  no_log: true
+  notify: restart splunk
+
+- name: Application
+  ansible.builtin.meta: flush_handlers
+
+# 2) Search Head Cluster : ici on utilise volontairement la CLI documentée par Splunk
+#    (init shcluster-config + bootstrap captain) plutôt qu'un template.
+- name: Search Head Cluster
+  ansible.builtin.import_tasks: shc.yml
+  when: shc_enabled

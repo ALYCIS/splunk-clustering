@@ -1,0 +1,10 @@
+# /etc/logstash/pipelines.yml — un pipeline par flux, isolés (un flux en erreur n'impacte pas les autres)
+- pipeline.id: kafka-to-splunk
+  path.config: "/etc/logstash/conf.d/kafka-to-splunk.conf"
+  pipeline.workers: 2
+  pipeline.batch.size: 250
+
+- pipeline.id: heartbeat
+  path.config: "/etc/logstash/conf.d/heartbeat.conf"
+  pipeline.workers: 1
+  queue.type: memory

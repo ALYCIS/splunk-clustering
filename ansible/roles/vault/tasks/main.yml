@@ -1,0 +1,39 @@
+---
+# Vault mono-nœud, stockage Raft intégré, SANS TLS (lab uniquement !).
+# En production : 3 ou 5 nœuds Raft, TLS, auto-unseal (KMS/HSM), audit device activé.
+- name: Podman et client Vault
+  ansible.builtin.package:
+    name: podman
+    state: present
+
+- name: Arborescence
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop: [/opt/vault, /opt/vault/config, /opt/vault/data]
+
+- name: Configuration serveur
+  ansible.builtin.template:
+    src: vault.hcl.j2
+    dest: /opt/vault/config/vault.hcl
+    mode: "0644"
+
+- name: Script d'initialisation des secrets du lab
+  ansible.builtin.template:
+    src: bootstrap.sh.j2
+    dest: /opt/vault/bootstrap.sh
+    mode: "0700"
+
+- name: Conteneur Vault
+  containers.podman.podman_container:
+    name: vault
+    image: "{{ vault_image }}"
+    state: started
+    network: host
+    restart_policy: always
+    cap_add: [IPC_LOCK]
+    volumes:
+      - /opt/vault/config:/vault/config:z
+      - /opt/vault/data:/vault/file:z
+    command: server

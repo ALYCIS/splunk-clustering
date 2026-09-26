@@ -1,0 +1,5 @@
+---
+- name: restart uf
+  ansible.builtin.systemd:
+    name: "{{ splunk_uf_service }}"
+    state: restarted

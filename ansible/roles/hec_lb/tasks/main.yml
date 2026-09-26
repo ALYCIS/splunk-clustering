@@ -1,0 +1,26 @@
+---
+- name: HAProxy
+  ansible.builtin.package:
+    name: haproxy
+    state: present
+
+- name: SELinux - autoriser HAProxy à se connecter à tous les ports
+  ansible.posix.seboolean:
+    name: haproxy_connect_any
+    state: true
+    persistent: true
+  when: ansible_selinux.status | default('disabled') == 'enabled'
+
+- name: Configuration du LB HEC
+  ansible.builtin.template:
+    src: haproxy.cfg.j2
+    dest: /etc/haproxy/haproxy.cfg
+    mode: "0644"
+    validate: haproxy -c -f %s
+  notify: reload haproxy
+
+- name: HAProxy démarré
+  ansible.builtin.service:
+    name: haproxy
+    state: started
+    enabled: true

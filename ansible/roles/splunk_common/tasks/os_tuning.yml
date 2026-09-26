@@ -1,0 +1,34 @@
+---
+# Recommandations Splunk : THP désactivé, ulimits élevés (LimitNOFILE/NPROC sont
+# posés par l'unité systemd générée par "enable boot-start -systemd-managed 1").
+- name: Service de désactivation des Transparent Huge Pages
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/disable-thp.service
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=Disable Transparent Huge Pages (Splunk)
+      DefaultDependencies=no
+      After=sysinit.target local-fs.target
+      Before=Splunkd.service SplunkForwarder.service
+
+      [Service]
+      Type=oneshot
+      ExecStart=/bin/sh -c 'echo never > /sys/kernel/mm/transparent_hugepage/enabled; echo never > /sys/kernel/mm/transparent_hugepage/defrag'
+
+      [Install]
+      WantedBy=basic.target
+
+- name: THP désactivé
+  ansible.builtin.systemd:
+    name: disable-thp
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Utilisateur de service splunk (Splunk ne doit jamais tourner en root)
+  ansible.builtin.user:
+    name: "{{ splunk_user }}"
+    system: true
+    create_home: true
+    shell: /bin/bash

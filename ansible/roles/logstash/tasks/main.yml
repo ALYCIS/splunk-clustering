@@ -1,0 +1,59 @@
+---
+- name: "Dépôt Elastic (en entreprise : dépôt RPM distant proxifié par Artifactory)"
+  ansible.builtin.yum_repository:
+    name: elastic
+    description: Elastic {{ logstash_major }}.x
+    baseurl: "https://artifacts.elastic.co/packages/{{ logstash_major }}.x/yum"
+    gpgkey: https://artifacts.elastic.co/GPG-KEY-elasticsearch
+    gpgcheck: true
+
+- name: Logstash
+  ansible.builtin.package:
+    name: logstash
+    state: present
+
+- name: Taille de la JVM
+  ansible.builtin.lineinfile:
+    path: /etc/logstash/jvm.options
+    regexp: "^{{ item }}"
+    line: "{{ item }}{{ logstash_heap }}"
+  loop: ["-Xms", "-Xmx"]
+  notify: restart logstash
+
+- name: Réglages globaux
+  ansible.builtin.copy:
+    src: "{{ repo_root }}/ingestion/logstash/logstash.yml"
+    dest: /etc/logstash/logstash.yml
+    mode: "0644"
+  notify: restart logstash
+
+- name: Déclaration des pipelines
+  ansible.builtin.copy:
+    src: "{{ repo_root }}/ingestion/logstash/pipelines.yml"
+    dest: /etc/logstash/pipelines.yml
+    mode: "0644"
+  notify: restart logstash
+
+- name: Pipelines (versionnés dans Git, rechargés à chaud)
+  ansible.builtin.copy:
+    src: "{{ repo_root }}/ingestion/logstash/pipeline/"
+    dest: /etc/logstash/conf.d/
+    mode: "0644"
+
+# Variables lues par ${VAR} dans les pipelines. Alternative prod : logstash-keystore.
+- name: Secrets et paramètres des pipelines (EnvironmentFile du service)
+  ansible.builtin.copy:
+    dest: /etc/sysconfig/logstash
+    mode: "0600"
+    content: |
+      HEC_URL={{ hec_lb_url }}
+      HEC_TOKEN={{ hec_token_logstash }}
+      KAFKA_BOOTSTRAP={{ kafka_bootstrap }}
+  no_log: true
+  notify: restart logstash
+
+- name: Logstash démarré
+  ansible.builtin.systemd:
+    name: logstash
+    state: started
+    enabled: true
